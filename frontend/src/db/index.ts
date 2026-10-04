@@ -2,6 +2,7 @@ import Dexie, { type Table } from 'dexie';
 import type { CaseSlot, TypeCase } from '../types/case';
 import type { DefectLog } from '../types/defect';
 import type { DefectSeverity, DefectType } from '../types/defect';
+import type { LoanBatch, LoanItem } from '../types/loan';
 import type { MatrixAvailability, MatrixFont, MatrixMaterial, TypeMatrix } from '../types/matrix';
 import { ptOfSize } from '../types/matrix';
 import type { ProofRecord } from '../types/proof';
@@ -15,12 +16,14 @@ export const DB_NAME = 'gbmovabletype-db';
  * v1 建 matrices
  * v2 加 cases 表与 matrixId 索引
  * v3 加 defects / proofs 表，并为停用字模回填缺损原因
+ * v4 加 loans 表；缺少版本字段的活动批次进入待复核，不自动完成
  */
 class MovableTypeDb extends Dexie {
   matrices!: Table<TypeMatrix, string>;
   cases!: Table<TypeCase, string>;
   defects!: Table<DefectLog, string>;
   proofs!: Table<ProofRecord, string>;
+  loans!: Table<LoanBatch, string>;
 
   constructor() {
     super(DB_NAME);
@@ -76,6 +79,27 @@ class MovableTypeDb extends Dexie {
             note: '由 v2 → v3 升级自动回填',
             createdAt: new Date().toISOString(),
           });
+        }
+      });
+    this.version(4)
+      .stores({
+        matrices: 'id, code, character, font, sizeName, material, availability',
+        cases: 'id, code, kind, workStation, *matrixId',
+        defects: 'id, matrixId, defectType, severity, availability, foundDate',
+        proofs: 'id, matrixId, sampleNo, clarity, proofDate',
+        loans: 'id, code, status, *items.matrixId, version',
+      })
+      .upgrade(async (tx) => {
+        // v4：为缺少版本字段的活动批次补版本号并转为待复核，不自动完成
+        const loans: LoanBatch[] = await tx.table('loans').toArray();
+        for (const loan of loans) {
+          if (loan.version === undefined || loan.version === null) {
+            const patch: Partial<LoanBatch> = { version: 1 };
+            if (loan.status === '进行中' || loan.status === '待复核') {
+              patch.status = '待复核';
+            }
+            await tx.table('loans').update(loan.id, patch);
+          }
         }
       });
   }
@@ -187,6 +211,42 @@ const SEED_PROOFS: SeedProof[] = [
   { id: 'pfr-3006', targetKind: '字符', targetRef: '纸', matrixId: 'm-1012', pressureKg: 9.5, ink: '松烟墨 08', impressions: 50, sampleNo: 'YZ-20250601-01', clarity: '清晰', proofDate: '2025-06-01', note: '' },
 ];
 
+interface SeedLoanItem {
+  matrixId: string;
+  toCaseId: string;
+  toRow: number | null;
+  toCol: number | null;
+}
+
+interface SeedLoan {
+  id: string;
+  code: string;
+  exhibitionName: string;
+  loanDate: string;
+  expectedReturnDate: string;
+  status: '进行中' | '已完成';
+  items: SeedLoanItem[];
+  operator: string;
+  note: string;
+}
+
+const SEED_LOANS: SeedLoan[] = [
+  {
+    id: 'loan-5001',
+    code: 'LOAN-2026-001',
+    exhibitionName: '活字印刷文化展',
+    loanDate: '2026-09-01',
+    expectedReturnDate: '2026-12-31',
+    status: '进行中',
+    items: [
+      { matrixId: 'm-1003', toCaseId: 'case-1002', toRow: 0, toCol: 2 },
+      { matrixId: 'm-1004', toCaseId: 'case-1002', toRow: 0, toCol: 3 },
+    ],
+    operator: '陈之安',
+    note: '借去巡展，展期三个月',
+  },
+];
+
 function buildSeed() {
   const now = new Date().toISOString();
   const matrices: TypeMatrix[] = SEED_MATRICES.map((m) => ({
@@ -233,7 +293,55 @@ function buildSeed() {
     };
   });
   const proofs: ProofRecord[] = SEED_PROOFS.map((p) => ({ ...p, createdAt: now }));
-  return { matrices, cases, defects, proofs };
+
+  // 借调批次：根据明细补全冗余字段与原格位信息
+  const loans: LoanBatch[] = SEED_LOANS.map((l) => {
+    const items: LoanItem[] = l.items.map((item) => {
+      const matrix = matrices.find((m) => m.id === item.matrixId);
+      const fromCase = cases.find((c) => c.slots.some((s) => s.matrixId === item.matrixId));
+      const fromSlot = fromCase?.slots.find((s) => s.matrixId === item.matrixId);
+      const toCase = cases.find((c) => c.id === item.toCaseId);
+      return {
+        matrixId: item.matrixId,
+        character: matrix?.character ?? '',
+        matrixCode: matrix?.code ?? '',
+        fromCaseId: fromCase?.id ?? '',
+        fromCaseCode: fromCase?.code ?? '',
+        fromRow: fromSlot?.row ?? 0,
+        fromCol: fromSlot?.col ?? 0,
+        toCaseId: toCase?.id ?? item.toCaseId,
+        toCaseCode: toCase?.code ?? '',
+        toRow: item.toRow,
+        toCol: item.toCol,
+        availabilitySnapshot: matrix?.availability ?? '可用',
+      };
+    });
+    return {
+      id: l.id,
+      code: l.code,
+      exhibitionName: l.exhibitionName,
+      loanDate: l.loanDate,
+      expectedReturnDate: l.expectedReturnDate,
+      status: l.status,
+      items,
+      version: 1,
+      operator: l.operator,
+      note: l.note,
+      createdAt: now,
+      updatedAt: now,
+      completedAt: l.status === '已完成' ? now : null,
+    };
+  });
+
+  // 进行中的借调批次：将字模可用性设为「借出」
+  const activeLoanMatrixIds = new Set(
+    loans.filter((l) => l.status === '进行中').flatMap((l) => l.items.map((i) => i.matrixId)),
+  );
+  const matricesWithLoan = matrices.map((m) =>
+    activeLoanMatrixIds.has(m.id) ? { ...m, availability: '借出' as const, updatedAt: now } : m,
+  );
+
+  return { matrices: matricesWithLoan, cases, defects, proofs, loans };
 }
 
 let seedPromise: Promise<void> | null = null;
@@ -242,11 +350,12 @@ async function doSeed(): Promise<void> {
   const count = await db.matrices.count();
   if (count > 0) return;
   const seed = toPlain(buildSeed());
-  await db.transaction('rw', db.matrices, db.cases, db.defects, db.proofs, async () => {
+  await db.transaction('rw', db.matrices, db.cases, db.defects, db.proofs, db.loans, async () => {
     await db.matrices.bulkPut(seed.matrices);
     await db.cases.bulkPut(seed.cases);
     await db.defects.bulkPut(seed.defects);
     await db.proofs.bulkPut(seed.proofs);
+    await db.loans.bulkPut(seed.loans);
   });
 }
 
@@ -264,7 +373,7 @@ export function ensureSeed(): Promise<void> {
 /** 按可用性统计字模数量（复用 availability 索引） */
 export async function countByAvailability(): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
-  for (const a of ['可用', '停用', '待补刻']) {
+  for (const a of ['可用', '停用', '待补刻', '借出']) {
     out[a] = await db.matrices.where('availability').equals(a).count();
   }
   return out;

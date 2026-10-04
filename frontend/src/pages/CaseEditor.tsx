@@ -7,6 +7,7 @@ import { DRAFT_KEYS, useLocalDraft } from '../hooks/useLocalDraft';
 import { useCaseSlots } from '../hooks/useCaseSlots';
 import { useMatrixSearch } from '../hooks/useMatrixSearch';
 import { useCaseStore } from '../stores/caseStore';
+import { useLoanStore } from '../stores/loanStore';
 import { useUiStore } from '../stores/uiStore';
 import type { CaseKind, CaseSlot, TypeCase } from '../types/case';
 import { CASE_KINDS, COL_RANGE, ROW_RANGE, describeCapacity, validateCaseInput } from '../types/case';
@@ -234,6 +235,7 @@ function CaseLayoutEditor({ typeCase }: { typeCase: TypeCase }) {
   const pushToast = useUiStore((s) => s.pushToast);
   const api = useCaseSlots(typeCase);
   const { results: candidateMatrices } = useMatrixSearch({ availability: ['可用'], ignoreKeyword: true });
+  const isMatrixOnLoan = useLoanStore((s) => s.isMatrixOnLoan);
   const [pickedChar, setPickedChar] = useState('');
   const [pending, setPending] = useState<PendingPlacement | null>(null);
   const [selectedKey, setSelectedKey] = useState('');
@@ -284,6 +286,18 @@ function CaseLayoutEditor({ typeCase }: { typeCase: TypeCase }) {
     }
     if (swapFrom) {
       if (swapFrom.row === row && swapFrom.col === col) {
+        setSwapFrom(null);
+        return;
+      }
+      const fromSlot = slotAt(api.slots, swapFrom.row, swapFrom.col);
+      const toSlot = slotAt(api.slots, row, col);
+      if (fromSlot && isMatrixOnLoan(fromSlot.matrixId)) {
+        pushToast(`「${fromSlot.character}」已在借调批次中，不能调换`, 'error');
+        setSwapFrom(null);
+        return;
+      }
+      if (toSlot && isMatrixOnLoan(toSlot.matrixId)) {
+        pushToast(`「${toSlot.character}」已在借调批次中，不能调换`, 'error');
         setSwapFrom(null);
         return;
       }
@@ -450,6 +464,11 @@ function CaseLayoutEditor({ typeCase }: { typeCase: TypeCase }) {
                   disabled={!selectedCell || !selectedSlot}
                   onClick={() => {
                     if (!selectedCell) return;
+                    const slot = slotAt(api.slots, selectedCell.row, selectedCell.col);
+                    if (slot && isMatrixOnLoan(slot.matrixId)) {
+                      pushToast(`「${slot.character}」已在借调批次中，不能取出`, 'error');
+                      return;
+                    }
                     api.take(selectedCell.row, selectedCell.col);
                     pushToast('已取出该格字模（尚未保存）', 'warn');
                   }}

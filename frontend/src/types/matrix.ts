@@ -8,8 +8,8 @@ export type MatrixFont = (typeof MATRIX_FONTS)[number];
 export const MATRIX_MATERIALS = ['铜模', '木活字', '铅合金'] as const;
 export type MatrixMaterial = (typeof MATRIX_MATERIALS)[number];
 
-/** 可用性：可用 / 停用 / 待补刻 */
-export const MATRIX_AVAILABILITIES = ['可用', '停用', '待补刻'] as const;
+/** 可用性：可用 / 停用 / 待补刻 / 借出 */
+export const MATRIX_AVAILABILITIES = ['可用', '停用', '待补刻', '借出'] as const;
 export type MatrixAvailability = (typeof MATRIX_AVAILABILITIES)[number];
 
 /** 字号（初号至八号）与对应磅值 */

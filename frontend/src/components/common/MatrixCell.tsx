@@ -24,12 +24,14 @@ const AVAILABILITY_RING: Record<string, string> = {
   可用: 'border-paper-line hover:border-jade',
   停用: 'border-seal/60',
   待补刻: 'border-brass/60',
+  借出: 'border-jade/60',
 };
 
 const AVAILABILITY_DOT: Record<string, string> = {
   可用: 'bg-jade',
   停用: 'bg-seal',
   待补刻: 'bg-brass',
+  借出: 'bg-jade',
 };
 
 /** 单字格：渲染字符大样、字号与状态，被总览页 / 字模登记页 / 字模详情页复用 */

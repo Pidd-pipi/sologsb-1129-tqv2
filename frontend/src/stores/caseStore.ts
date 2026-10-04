@@ -88,6 +88,14 @@ export const useCaseStore = create<CaseState>((set, get) => ({
   },
 
   removeCase: async (id) => {
+    // 检查字盘是否被借调批次引用
+    const activeLoans = await db.loans.where('status').anyOf(['待复核', '进行中']).toArray();
+    const referenced = activeLoans.some(
+      (l) => l.items.some((i) => i.fromCaseId === id || i.toCaseId === id),
+    );
+    if (referenced) {
+      throw new Error('该字盘被借调批次引用，请先完成或取消批次后再删除');
+    }
     await db.cases.delete(id);
     set((s) => ({ cases: s.cases.filter((c) => c.id !== id) }));
   },

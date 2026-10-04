@@ -6,6 +6,7 @@ import LayoutGrid from '../components/common/LayoutGrid';
 import MatrixCell from '../components/common/MatrixCell';
 import { useMatrixStore } from '../stores/matrixStore';
 import { findCaseHolding, useCaseStore } from '../stores/caseStore';
+import { useLoanStore } from '../stores/loanStore';
 import { useUiStore } from '../stores/uiStore';
 import { DEFECT_SEVERITIES, DEFECT_TYPES, validateDefectInput } from '../types/defect';
 import type { DefectSeverity, DefectType } from '../types/defect';
@@ -49,6 +50,7 @@ export default function MatrixDetail() {
   const repairMatrix = useMatrixStore((s) => s.repairMatrix);
   const removeMatrix = useMatrixStore((s) => s.removeMatrix);
   const cases = useCaseStore((s) => s.cases);
+  const activeLoan = useLoanStore((s) => s.activeLoanOfMatrix(id));
   const pushToast = useUiStore((s) => s.pushToast);
 
   const matrix = matrices.find((m) => m.id === id);
@@ -226,6 +228,15 @@ export default function MatrixDetail() {
           <span className="mt-chip" data-testid="detail-availability">
             当前状态：{matrix.availability}
           </span>
+          {activeLoan ? (
+            <Link
+              className="mt-chip border-jade/40 bg-jade-pale text-jade"
+              to="/loans"
+              data-testid="detail-loan-link"
+            >
+              借调中：{activeLoan.code} · {activeLoan.exhibitionName}
+            </Link>
+          ) : null}
           {matrix.availability !== '可用' ? (
             <button type="button" className="mt-btn mt-btn-primary" data-testid="repair-btn" onClick={handleRepair}>
               补刻完成，恢复可用
@@ -274,6 +285,11 @@ export default function MatrixDetail() {
             <p>缺损记录 {matrixDefects.length} 条</p>
             <p>试印记录 {matrixProofs.length} 条</p>
             <p>所在字盘 {holdings.length} 处</p>
+            {activeLoan ? (
+              <p className="text-jade" data-testid="detail-loan-info">
+                借调中：{activeLoan.code}（{activeLoan.status}）
+              </p>
+            ) : null}
           </div>
           {editing ? (
             <div className="mt-3 space-y-2 border-t border-paper-line pt-3">

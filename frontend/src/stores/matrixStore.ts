@@ -92,6 +92,12 @@ export const useMatrixStore = create<MatrixState>((set, get) => ({
   },
 
   removeMatrix: async (id) => {
+    // 检查字模是否在借调批次中
+    const activeLoans = await db.loans.where('status').anyOf(['待复核', '进行中']).toArray();
+    const onLoan = activeLoans.some((l) => l.items.some((i) => i.matrixId === id));
+    if (onLoan) {
+      throw new Error('该字模在借调批次中，请先完成或取消批次后再删除');
+    }
     await db.transaction('rw', db.matrices, db.defects, db.proofs, async () => {
       await db.matrices.delete(id);
       const defectIds = (await db.defects.where('matrixId').equals(id).toArray()).map((d) => d.id);

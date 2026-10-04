@@ -37,6 +37,7 @@ export default function Overview() {
   const available = matrices.filter((m) => m.availability === '可用').length;
   const disabled = matrices.filter((m) => m.availability === '停用').length;
   const repair = matrices.filter((m) => m.availability === '待补刻').length;
+  const onLoan = matrices.filter((m) => m.availability === '借出').length;
 
   return (
     <div className="space-y-4">
@@ -61,6 +62,9 @@ export default function Overview() {
           </span>
           <span className="mt-chip border-brass/40 text-brass" data-testid="stat-repair">
             待补刻 {repair}
+          </span>
+          <span className="mt-chip border-jade/40 text-jade" data-testid="stat-loan">
+            借出 {onLoan}
           </span>
         </div>
       </section>
