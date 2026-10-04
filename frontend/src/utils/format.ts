@@ -78,6 +78,12 @@ export function suggestCaseCode(seq: number): string {
   return `ZP-${letter}-${num2}`;
 }
 
+/** 生成借调批次编号建议，例：JZ-20261004-01 */
+export function suggestLoanCode(dateStr: string, seq: number): string {
+  const compact = (dateStr || todayStr()).replace(/-/g, '');
+  return `JZ-${compact}-${`${seq}`.padStart(2, '0')}`;
+}
+
 /** 生成样张编号建议，例：YZ-20250520-03 */
 export function suggestSampleNo(dateStr: string, seq: number): string {
   const compact = (dateStr || todayStr()).replace(/-/g, '');

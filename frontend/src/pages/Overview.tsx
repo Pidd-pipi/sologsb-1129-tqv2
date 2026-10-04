@@ -3,6 +3,7 @@ import DefectBadge from '../components/common/DefectBadge';
 import EmptyState from '../components/common/EmptyState';
 import MatrixCell from '../components/common/MatrixCell';
 import { useMatrixSearch } from '../hooks/useMatrixSearch';
+import { selectOpenLoanForMatrix, useLoanStore } from '../stores/loanStore';
 import { useMatrixStore } from '../stores/matrixStore';
 import { useUiStore } from '../stores/uiStore';
 import {
@@ -32,11 +33,13 @@ export default function Overview() {
   const setFilter = useUiStore((s) => s.setFilter);
   const resetFilter = useUiStore((s) => s.resetFilter);
   const { results, countByAvailability, latestDefect } = useMatrixSearch();
+  const loans = useLoanStore((s) => s.loans);
 
   const total = matrices.length;
   const available = matrices.filter((m) => m.availability === '可用').length;
   const disabled = matrices.filter((m) => m.availability === '停用').length;
   const repair = matrices.filter((m) => m.availability === '待补刻').length;
+  const loanedOut = matrices.filter((m) => m.availability === '借调中').length;
 
   return (
     <div className="space-y-4">
@@ -61,6 +64,9 @@ export default function Overview() {
           </span>
           <span className="mt-chip border-brass/40 text-brass" data-testid="stat-repair">
             待补刻 {repair}
+          </span>
+          <span className="mt-chip border-jade/50 text-jade" data-testid="stat-loaned">
+            借调中 {loanedOut}
           </span>
         </div>
       </section>
@@ -194,7 +200,7 @@ export default function Overview() {
               {a} {countByAvailability[a] ?? 0} 枚
             </span>
           ))}
-          <span>· 角标为最新缺损记录</span>
+          <span>· 角标为最新缺损记录，借调中可点绿色标记回溯批次</span>
         </div>
       </section>
 
@@ -228,6 +234,7 @@ export default function Overview() {
       >
         {results.map((m) => {
           const defect = latestDefect(m.id);
+          const openLoan = selectOpenLoanForMatrix(loans, m.id);
           return (
             <div key={m.id} className="space-y-1">
               <Link to={`/matrices/${m.id}`} data-testid={`matrix-link-${m.id}`} className="block">
@@ -249,6 +256,16 @@ export default function Overview() {
                 </span>
                 <span>{pinyinOf(m.character) || '未收录'}</span>
               </div>
+              {openLoan ? (
+                <Link
+                  to={`/loans/${openLoan.id}`}
+                  className="block truncate rounded border border-jade/40 bg-jade-pale px-1.5 py-0.5 text-[10px] text-jade"
+                  data-testid={`overview-loan-${m.id}`}
+                  title={`随批次 ${openLoan.code} 借往 ${openLoan.exhibition}`}
+                >
+                  借调中 · {openLoan.code}
+                </Link>
+              ) : null}
               {defect ? (
                 <div className="flex items-center justify-between gap-1 px-0.5">
                   <DefectBadge
@@ -273,7 +290,9 @@ export default function Overview() {
           <p>
             可用率：{percent(available, total)}%（可用 {available} / 合计 {total}）
           </p>
-          <p>停用字模：{disabled} 枚，需补刻或重铸后方可回到排字工位</p>
+          <p>
+            借调巡展中 {loanedOut} 枚；停用 {disabled} 枚，需补刻或重铸后方可回到排字工位
+          </p>
           <p>
             最近更新：
             {matrices[0] ? `${dash(matrices[0].code)} · ${formatStamp(matrices[0].updatedAt)}` : '—'}

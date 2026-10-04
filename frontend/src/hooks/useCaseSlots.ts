@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useCaseStore } from '../stores/caseStore';
+import { useLoanStore } from '../stores/loanStore';
 import type { CaseSlot, TypeCase } from '../types/case';
 import type { TypeMatrix } from '../types/matrix';
 import {
@@ -24,6 +25,9 @@ export interface CaseSlotsApi {
   capacity: ReturnType<typeof validateCapacity>;
   fillPercent: number;
   emptyCells: RCCell[];
+  /** 未结束借调批次冻结的原格位键集合 */
+  frozenKeys: Set<string>;
+  isFrozen: (row: number, col: number) => boolean;
   /** 落位：把一枚可用字模放到指定格位 */
   place: (matrix: TypeMatrix, row: number, col: number) => void;
   /** 取出格位上的字模 */
@@ -44,6 +48,7 @@ export interface CaseSlotsApi {
  */
 export function useCaseSlots(typeCase: TypeCase | undefined): CaseSlotsApi {
   const saveSlots = useCaseStore((s) => s.saveSlots);
+  const loans = useLoanStore((s) => s.loans);
   const [slots, setSlots] = useState<CaseSlot[]>(typeCase?.slots ?? []);
   const [saving, setSaving] = useState(false);
 
@@ -57,6 +62,23 @@ export function useCaseSlots(typeCase: TypeCase | undefined): CaseSlotsApi {
   const rows = typeCase?.rows ?? 0;
   const cols = typeCase?.cols ?? 0;
 
+  /** 借调批次冻结的原格位：未结束批次期间不能落位 / 取出 / 调换 */
+  const frozenKeys = useMemo(() => {
+    const set = new Set<string>();
+    if (!typeCase) return set;
+    for (const loan of loans) {
+      for (const item of loan.items) {
+        if (item.sourceCaseId === typeCase.id) set.add(`${item.sourceRow}-${item.sourceCol}`);
+      }
+    }
+    return set;
+  }, [loans, typeCase]);
+
+  const isFrozen = useCallback(
+    (row: number, col: number) => frozenKeys.has(`${row}-${col}`),
+    [frozenKeys],
+  );
+
   const persisted = typeCase?.slots ?? [];
   const dirty = useMemo(
     () => JSON.stringify(slots) !== JSON.stringify(persisted),
@@ -69,6 +91,7 @@ export function useCaseSlots(typeCase: TypeCase | undefined): CaseSlotsApi {
   const emptyCells = useMemo(() => emptySlots(rows, cols, slots), [rows, cols, slots]);
 
   const place = useCallback((matrix: TypeMatrix, row: number, col: number) => {
+    if (frozenKeys.has(`${row}-${col}`)) return;
     const slot: CaseSlot = {
       row,
       col,
@@ -77,15 +100,17 @@ export function useCaseSlots(typeCase: TypeCase | undefined): CaseSlotsApi {
       placedAt: new Date().toISOString(),
     };
     setSlots((cur) => placeSlot(cur, slot));
-  }, []);
+  }, [frozenKeys]);
 
   const take = useCallback((row: number, col: number) => {
+    if (frozenKeys.has(`${row}-${col}`)) return;
     setSlots((cur) => removeSlot(cur, row, col));
-  }, []);
+  }, [frozenKeys]);
 
   const swap = useCallback((a: RCCell, b: RCCell) => {
+    if (frozenKeys.has(`${a.row}-${a.col}`) || frozenKeys.has(`${b.row}-${b.col}`)) return;
     setSlots((cur) => swapSlots(cur, a, b));
-  }, []);
+  }, [frozenKeys]);
 
   const clear = useCallback(() => setSlots([]), []);
   const replaceAll = useCallback((next: CaseSlot[]) => setSlots(next), []);
@@ -93,13 +118,22 @@ export function useCaseSlots(typeCase: TypeCase | undefined): CaseSlotsApi {
 
   const save = useCallback(async () => {
     if (!typeCase) return;
+    // 冻结格位（未结束借调批次的原格位）不允许通过布局保存被改动
+    for (const key of frozenKeys) {
+      const [r, c] = key.split('-').map(Number);
+      const before = typeCase.slots.find((s) => s.row === r && s.col === c);
+      const after = slots.find((s) => s.row === r && s.col === c);
+      if (!before || !after || before.matrixId !== after.matrixId) {
+        throw new Error(`格位 ${key} 的字模已随借调批次出库，原格位冻结，不能改动`);
+      }
+    }
     setSaving(true);
     try {
       await saveSlots(typeCase.id, slots);
     } finally {
       setSaving(false);
     }
-  }, [saveSlots, slots, typeCase]);
+  }, [saveSlots, slots, typeCase, frozenKeys]);
 
   return {
     slots,
@@ -109,6 +143,8 @@ export function useCaseSlots(typeCase: TypeCase | undefined): CaseSlotsApi {
     capacity,
     fillPercent,
     emptyCells,
+    frozenKeys,
+    isFrozen,
     place,
     take,
     swap,

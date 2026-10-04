@@ -271,10 +271,15 @@ function CaseLayoutEditor({ typeCase }: { typeCase: TypeCase }) {
     ],
     [api.conflicts],
   );
+  const frozenKeys = useMemo(() => Array.from(api.frozenKeys), [api.frozenKeys]);
 
   const handleSlotClick = (row: number, col: number) => {
     const key = rcKey(row, col);
     setSelectedKey(key);
+    if (api.isFrozen(row, col)) {
+      pushToast('该格字模已随借调批次出库，原格位冻结，归还前不能落位 / 取出 / 调换', 'warn');
+      return;
+    }
     if (pending) {
       api.place(pending.matrix, row, col);
       pushToast(
@@ -285,6 +290,10 @@ function CaseLayoutEditor({ typeCase }: { typeCase: TypeCase }) {
     if (swapFrom) {
       if (swapFrom.row === row && swapFrom.col === col) {
         setSwapFrom(null);
+        return;
+      }
+      if (api.isFrozen(row, col)) {
+        pushToast('目标格位处于借调冻结状态，不能调换', 'warn');
         return;
       }
       api.swap(swapFrom, { row, col });
@@ -349,6 +358,7 @@ function CaseLayoutEditor({ typeCase }: { typeCase: TypeCase }) {
               slots={api.slots}
               highlight={selectedCell}
               conflictKeys={conflictKeys}
+              frozenKeys={frozenKeys}
               pendingCharacter={pending?.matrix.character ?? ''}
               onSlotClick={handleSlotClick}
               testIdPrefix="case-slot"
@@ -363,7 +373,7 @@ function CaseLayoutEditor({ typeCase }: { typeCase: TypeCase }) {
             >
               <p data-testid="capacity-message">{api.capacity.message}</p>
               <p>
-                空格 {api.emptyCells.length} 个
+                空格 {api.emptyCells.length} 个 · 借调冻结 {frozenKeys.length} 格
                 {api.conflicts.duplicateCharacters.length > 0
                   ? ` · 重复落位 ${api.conflicts.duplicateCharacters
                       .map((g) => `${g.character}×${g.count}`)
@@ -439,7 +449,7 @@ function CaseLayoutEditor({ typeCase }: { typeCase: TypeCase }) {
                 {selectedCell
                   ? `选中格位：${rowLabel(selectedCell.row)}${selectedCell.col + 1}${
                       selectedSlot ? ` · ${selectedSlot.character}（${selectedSlot.matrixId}）` : ' · 空格'
-                    }`
+                    }${api.isFrozen(selectedCell.row, selectedCell.col) ? ' · 借调冻结' : ''}`
                   : '未选中格位（点击网格选择）'}
               </p>
               <div className="mt-2 flex flex-wrap gap-2">
@@ -447,7 +457,7 @@ function CaseLayoutEditor({ typeCase }: { typeCase: TypeCase }) {
                   type="button"
                   className="mt-btn"
                   data-testid="take-slot-btn"
-                  disabled={!selectedCell || !selectedSlot}
+                  disabled={!selectedCell || !selectedSlot || (selectedCell ? api.isFrozen(selectedCell.row, selectedCell.col) : false)}
                   onClick={() => {
                     if (!selectedCell) return;
                     api.take(selectedCell.row, selectedCell.col);

@@ -11,6 +11,8 @@ export interface LayoutGridProps {
   highlightKeys?: string[];
   /** 冲突格位（重复落位 / 越界） */
   conflictKeys?: string[];
+  /** 借调冻结格位（未结束批次的原格位） */
+  frozenKeys?: string[];
   /** 待落位字符提示 */
   pendingCharacter?: string;
   readOnly?: boolean;
@@ -28,6 +30,7 @@ export default function LayoutGrid({
   highlight,
   highlightKeys = [],
   conflictKeys = [],
+  frozenKeys = [],
   pendingCharacter = '',
   readOnly = false,
   onSlotClick,
@@ -35,6 +38,7 @@ export default function LayoutGrid({
 }: LayoutGridProps) {
   const highlightSet = new Set(highlightKeys);
   const conflictSet = new Set(conflictKeys);
+  const frozenSet = new Set(frozenKeys);
 
   return (
     <div className="overflow-x-auto">
@@ -67,6 +71,7 @@ export default function LayoutGrid({
                 const isSelected = highlight?.row === r && highlight?.col === c;
                 const isHighlighted = highlightSet.has(key);
                 const isConflict = conflictSet.has(key);
+                const isFrozen = frozenSet.has(key);
                 const canClick = !readOnly && Boolean(onSlotClick);
                 return (
                   <button
@@ -74,20 +79,25 @@ export default function LayoutGrid({
                     type="button"
                     disabled={!canClick}
                     onClick={() => onSlotClick?.(r, c)}
-                    title={`${ROW_LABELS[r] ?? r + 1}${c + 1} ${slot ? slot.character : '空格'}`}
+                    title={`${ROW_LABELS[r] ?? r + 1}${c + 1} ${slot ? slot.character : '空格'}${isFrozen ? '（借调冻结）' : ''}`}
                     data-testid={`${testIdPrefix}-${r}-${c}`}
                     data-filled={slot ? '1' : '0'}
+                    data-frozen={isFrozen ? '1' : '0'}
                     className={`flex h-11 flex-col items-center justify-center rounded border text-center transition ${
                       slot ? 'border-ink/25 bg-white shadow-press' : 'border-dashed border-paper-line bg-paper/50'
                     } ${isSelected ? 'ring-2 ring-seal' : ''} ${
                       isHighlighted ? 'ring-2 ring-brass' : ''
                     } ${isConflict ? 'border-seal bg-seal-pale' : ''} ${
-                      canClick ? 'cursor-pointer hover:border-seal' : 'cursor-default'
-                    } ${pendingCharacter && !slot ? 'hover:bg-brass-pale' : ''}`}
+                      isFrozen ? 'border-jade/70 bg-jade-pale' : ''
+                    } ${canClick ? 'cursor-pointer hover:border-seal' : 'cursor-default'} ${
+                      pendingCharacter && !slot && !isFrozen ? 'hover:bg-brass-pale' : ''
+                    }`}
                   >
                     <span className="font-song text-lg leading-none text-ink">{slot?.character ?? ''}</span>
                     {slot ? (
-                      <span className="mt-0.5 text-[9px] leading-none text-ink-mute">{slot.matrixId}</span>
+                      <span className="mt-0.5 text-[9px] leading-none text-ink-mute">
+                        {isFrozen ? '借调' : slot.matrixId}
+                      </span>
                     ) : (
                       <span className="text-[9px] leading-none text-ink-mute/70">
                         {pendingCharacter || `${r + 1}·${c + 1}`}

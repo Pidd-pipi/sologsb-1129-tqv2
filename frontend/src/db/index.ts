@@ -2,11 +2,12 @@ import Dexie, { type Table } from 'dexie';
 import type { CaseSlot, TypeCase } from '../types/case';
 import type { DefectLog } from '../types/defect';
 import type { DefectSeverity, DefectType } from '../types/defect';
+import type { LoanBatch, LoanItem } from '../types/loan';
 import type { MatrixAvailability, MatrixFont, MatrixMaterial, TypeMatrix } from '../types/matrix';
 import { ptOfSize } from '../types/matrix';
 import type { ProofRecord } from '../types/proof';
 import { matrixIdsOf } from '../utils/layout';
-import { suggestCaseCode, suggestMatrixCode, toPlain } from '../utils/format';
+import { suggestCaseCode, suggestLoanCode, suggestMatrixCode, toPlain } from '../utils/format';
 
 export const DB_NAME = 'gbmovabletype-db';
 
@@ -15,15 +16,17 @@ export const DB_NAME = 'gbmovabletype-db';
  * v1 建 matrices
  * v2 加 cases 表与 matrixId 索引
  * v3 加 defects / proofs 表，并为停用字模回填缺损原因
+ * v4 加 loans 表（借调批次）；旧批次缺少乐观锁 version 字段时转「待复核」
  */
 class MovableTypeDb extends Dexie {
   matrices!: Table<TypeMatrix, string>;
   cases!: Table<TypeCase, string>;
   defects!: Table<DefectLog, string>;
   proofs!: Table<ProofRecord, string>;
+  loans!: Table<LoanBatch, string>;
 
-  constructor() {
-    super(DB_NAME);
+  constructor(name: string = DB_NAME) {
+    super(name);
     this.version(1).stores({
       matrices: 'id, code, character, font, sizeName, material, availability',
     });
@@ -49,6 +52,9 @@ class MovableTypeDb extends Dexie {
         cases: 'id, code, kind, workStation, *matrixId',
         defects: 'id, matrixId, defectType, severity, availability, foundDate',
         proofs: 'id, matrixId, sampleNo, clarity, proofDate',
+        // 借调批次表在 v4 才启用；这里提前声明是为了让升级路径把它当作既有表保留，
+        // 避免 v4 建表时 Dexie 清掉 v3 库中由旧版本非正式写入的 loans 数据。
+        loans: 'id, code, status, updatedAt',
       })
       .upgrade(async (tx) => {
         // v3：为历史「停用 / 待补刻」字模回填一条缺损原因记录，保证停用有据可查
@@ -78,9 +84,59 @@ class MovableTypeDb extends Dexie {
           });
         }
       });
+    this.version(4)
+      .stores({
+        matrices: 'id, code, character, font, sizeName, material, availability',
+        cases: 'id, code, kind, workStation, *matrixId',
+        defects: 'id, matrixId, defectType, severity, availability, foundDate',
+        proofs: 'id, matrixId, sampleNo, clarity, proofDate',
+        loans: 'id, code, status, *matrixIds, updatedAt',
+      })
+      .upgrade(async (tx) => {
+        // v4：历史借调批次（v4 前由非正式版本写入的数据）可能没有乐观锁 version 字段。
+        // 凡未结束又缺少 version 的活动批次，一律进入「待复核」，绝不自动完成。
+        const table = tx.table('loans');
+        const rows: LoanBatch[] = await table.toArray();
+        for (const row of rows) {
+          const patch: Partial<LoanBatch> = {};
+          const missingVersion = typeof row.version !== 'number';
+          if (missingVersion) patch.version = 0;
+          const wasOpen = row.status !== '已完成' && row.status !== '已取消';
+          if (wasOpen && (missingVersion || row.status === undefined)) {
+            patch.status = '待复核';
+            patch.reviewReason = 'v3 → v4 升级：旧批次缺少版本字段，需人工复核后再继续';
+          } else {
+            patch.reviewReason = row.reviewReason ?? '';
+          }
+          if (!Array.isArray(row.items)) patch.items = [];
+          else {
+            patch.items = row.items.map((it: LoanItem) => ({
+              matrixId: it.matrixId,
+              character: it.character ?? '',
+              matrixCode: it.matrixCode ?? '',
+              priorAvailability: it.priorAvailability ?? '可用',
+              sourceCaseId: it.sourceCaseId ?? '',
+              sourceCaseCode: it.sourceCaseCode ?? '',
+              sourceRow: Number(it.sourceRow) || 0,
+              sourceCol: Number(it.sourceCol) || 0,
+              targetCaseId: it.targetCaseId ?? '',
+              targetCaseCode: it.targetCaseCode ?? '',
+              targetRow: it.targetRow === undefined ? null : it.targetRow,
+              targetCol: it.targetCol === undefined ? null : it.targetCol,
+              assignedAt: it.assignedAt ?? row.updatedAt ?? new Date().toISOString(),
+            }));
+          }
+          patch.completedAt = row.completedAt ?? '';
+          if (Array.isArray(row.items)) {
+            patch.matrixIds = Array.from(new Set(patch.items!.map((it) => it.matrixId).filter(Boolean)));
+          }
+          await table.update(row.id, patch);
+        }
+      });
   }
 }
 
+export { MovableTypeDb };
 export const db = new MovableTypeDb();
 
 interface SeedMatrix {
@@ -264,7 +320,7 @@ export function ensureSeed(): Promise<void> {
 /** 按可用性统计字模数量（复用 availability 索引） */
 export async function countByAvailability(): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
-  for (const a of ['可用', '停用', '待补刻']) {
+  for (const a of ['可用', '停用', '待补刻', '借调中']) {
     out[a] = await db.matrices.where('availability').equals(a).count();
   }
   return out;

@@ -6,10 +6,12 @@ import LayoutGrid from '../components/common/LayoutGrid';
 import MatrixCell from '../components/common/MatrixCell';
 import { useMatrixStore } from '../stores/matrixStore';
 import { findCaseHolding, useCaseStore } from '../stores/caseStore';
+import { selectOpenLoanForMatrix, useLoanStore } from '../stores/loanStore';
 import { useUiStore } from '../stores/uiStore';
 import { DEFECT_SEVERITIES, DEFECT_TYPES, validateDefectInput } from '../types/defect';
 import type { DefectSeverity, DefectType } from '../types/defect';
 import {
+  DEFECT_AVAILABILITIES,
   MATRIX_AVAILABILITIES,
   MATRIX_FONTS,
   MATRIX_MATERIALS,
@@ -49,6 +51,7 @@ export default function MatrixDetail() {
   const repairMatrix = useMatrixStore((s) => s.repairMatrix);
   const removeMatrix = useMatrixStore((s) => s.removeMatrix);
   const cases = useCaseStore((s) => s.cases);
+  const loans = useLoanStore((s) => s.loans);
   const pushToast = useUiStore((s) => s.pushToast);
 
   const matrix = matrices.find((m) => m.id === id);
@@ -61,6 +64,11 @@ export default function MatrixDetail() {
     [proofs, id],
   );
   const holdings = useMemo(() => findCaseHolding(cases, id), [cases, id]);
+  const openLoan = useMemo(() => selectOpenLoanForMatrix(loans, id), [loans, id]);
+  const loanHistory = useMemo(
+    () => loans.filter((l) => l.items.some((it) => it.matrixId === id)).sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)),
+    [loans, id],
+  );
 
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState({
@@ -122,13 +130,17 @@ export default function MatrixDetail() {
   };
 
   const handleSaveInfo = async () => {
-    await updateMatrix(matrix.id, {
-      engraver: editForm.engraver.trim(),
-      note: editForm.note.trim(),
-      availability: editForm.availability,
-    });
-    setEditing(false);
-    pushToast('字面信息已更新');
+    try {
+      await updateMatrix(matrix.id, {
+        engraver: editForm.engraver.trim(),
+        note: editForm.note.trim(),
+        availability: editForm.availability,
+      });
+      setEditing(false);
+      pushToast('字面信息已更新');
+    } catch (err) {
+      pushToast(err instanceof Error ? err.message : '保存失败', 'error');
+    }
   };
 
   const handleAddDefect = async (e: FormEvent) => {
@@ -226,7 +238,7 @@ export default function MatrixDetail() {
           <span className="mt-chip" data-testid="detail-availability">
             当前状态：{matrix.availability}
           </span>
-          {matrix.availability !== '可用' ? (
+          {matrix.availability !== '可用' && matrix.availability !== '借调中' ? (
             <button type="button" className="mt-btn mt-btn-primary" data-testid="repair-btn" onClick={handleRepair}>
               补刻完成，恢复可用
             </button>
@@ -302,7 +314,7 @@ export default function MatrixDetail() {
                     setEditForm((p) => ({ ...p, availability: e.target.value as MatrixAvailability }))
                   }
                 >
-                  {MATRIX_AVAILABILITIES.map((a) => (
+                  {DEFECT_AVAILABILITIES.map((a) => (
                     <option key={a} value={a}>
                       {a}
                     </option>
@@ -377,6 +389,47 @@ export default function MatrixDetail() {
                   </div>
                 ))}
               </div>
+            )}
+          </div>
+          <div className="border-t border-paper-line px-4 py-3">
+            <h4 className="mb-2 font-song text-sm font-semibold text-ink">巡展借调追溯</h4>
+            {openLoan ? (
+              <div className="mb-2 rounded border border-jade/40 bg-jade-pale px-3 py-2 text-xs text-jade" data-testid="detail-open-loan">
+                正随批次
+                <Link className="mx-1 underline" to={`/loans/${openLoan.id}`}>{openLoan.code}</Link>
+                借往「{openLoan.exhibition}」，原格位
+                {openLoan.items
+                  .filter((it) => it.matrixId === id)
+                  .map((it) => `${it.sourceCaseCode} ${String.fromCharCode(65 + it.sourceRow)}${it.sourceCol + 1}`)
+                  .join('、')}
+                已冻结，计划 {formatDate(openLoan.expectedReturnDate)} 归还。
+              </div>
+            ) : (
+              <p className="mb-2 text-xs text-ink-mute" data-testid="detail-no-open-loan">
+                当前不在任何未结束批次中。
+              </p>
+            )}
+            {loanHistory.length === 0 ? (
+              <p className="text-xs text-ink-mute">暂无借调记录。</p>
+            ) : (
+              <ul className="space-y-1" data-testid="detail-loan-history">
+                {loanHistory.map((l) => {
+                  const item = l.items.find((it) => it.matrixId === id);
+                  return (
+                    <li key={l.id} className="text-xs text-ink-soft">
+                      <Link className="text-seal hover:underline" to={`/loans/${l.id}`}>{l.code}</Link>
+                      <span className="ml-1">{l.exhibition}</span>
+                      <span className="ml-1 mt-chip">{l.status}</span>
+                      {item ? (
+                        <span className="ml-1 text-ink-mute">
+                          {item.sourceCaseCode} {String.fromCharCode(65 + item.sourceRow)}{item.sourceCol + 1}
+                          {item.targetCaseCode ? ` → ${item.targetCaseCode}` : ''}
+                        </span>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
             )}
           </div>
         </div>
@@ -477,7 +530,7 @@ export default function MatrixDetail() {
                     setDefectForm((p) => ({ ...p, availability: e.target.value as MatrixAvailability }))
                   }
                 >
-                  {MATRIX_AVAILABILITIES.map((a) => (
+                  {DEFECT_AVAILABILITIES.map((a) => (
                     <option key={a} value={a}>
                       {a}
                     </option>

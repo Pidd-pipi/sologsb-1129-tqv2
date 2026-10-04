@@ -81,6 +81,16 @@ export const useMatrixStore = create<MatrixState>((set, get) => ({
 
   updateMatrix: async (id, patch) => {
     const plain = toPlain(patch);
+    const current = get().matrices.find((m) => m.id === id);
+    // 「借调中」由借调批次流程维护，人工编辑不能直接切入或切出
+    if (plain.availability) {
+      if (current?.availability === '借调中' && plain.availability !== '借调中') {
+        throw new Error('该字模已随借调批次出库，请在借调批次完成或取消后再修改可用性');
+      }
+      if (current?.availability !== '借调中' && plain.availability === '借调中') {
+        throw new Error('「借调中」状态由借调批次自动维护，不能手工设置');
+      }
+    }
     const next: Partial<TypeMatrix> = { ...plain, updatedAt: new Date().toISOString() };
     if (plain.sizeName) next.sizePt = ptOfSize(plain.sizeName);
     await db.matrices.update(id, next);
@@ -92,6 +102,10 @@ export const useMatrixStore = create<MatrixState>((set, get) => ({
   },
 
   removeMatrix: async (id) => {
+    const matrix = get().matrices.find((m) => m.id === id);
+    if (matrix?.availability === '借调中') {
+      throw new Error('该字模已随借调批次出库，请先完成或取消对应批次后再删除档案');
+    }
     await db.transaction('rw', db.matrices, db.defects, db.proofs, async () => {
       await db.matrices.delete(id);
       const defectIds = (await db.defects.where('matrixId').equals(id).toArray()).map((d) => d.id);
@@ -110,6 +124,9 @@ export const useMatrixStore = create<MatrixState>((set, get) => ({
   addDefect: async (input) => {
     const matrix = get().matrices.find((m) => m.id === input.matrixId);
     if (!matrix) throw new Error('未找到对应字模，无法登记缺损');
+    if (matrix.availability === '借调中') {
+      throw new Error('该字模已随借调批次出库巡展，请等批次完成归还后再登记缺损结论');
+    }
     const row: DefectLog = toPlain({
       id: makeId('dft'),
       matrixId: input.matrixId,
@@ -136,6 +153,9 @@ export const useMatrixStore = create<MatrixState>((set, get) => ({
   repairMatrix: async (matrixId, operator) => {
     const matrix = get().matrices.find((m) => m.id === matrixId);
     if (!matrix) throw new Error('未找到对应字模，无法补刻');
+    if (matrix.availability === '借调中') {
+      throw new Error('该字模已随借调批次出库，请等批次完成归还后再补刻');
+    }
     const history = get()
       .defects.filter((d) => d.matrixId === matrixId)
       .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));

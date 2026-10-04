@@ -88,6 +88,16 @@ export const useCaseStore = create<CaseState>((set, get) => ({
   },
 
   removeCase: async (id) => {
+    // 未结束借调批次引用该字盘（原格位或目标格位）时禁止删除，保证格位可追溯
+    const { useLoanStore } = await import('./loanStore');
+    const referenced = useLoanStore
+      .getState()
+      .loans.some(
+        (l) =>
+          (l.status === '进行中' || l.status === '待复核') &&
+          l.items.some((it) => it.sourceCaseId === id || it.targetCaseId === id),
+      );
+    if (referenced) throw new Error('该字盘正被未结束的借调批次引用，请先完成或取消批次后再删除');
     await db.cases.delete(id);
     set((s) => ({ cases: s.cases.filter((c) => c.id !== id) }));
   },

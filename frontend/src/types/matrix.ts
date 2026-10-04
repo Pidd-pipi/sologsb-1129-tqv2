@@ -8,9 +8,12 @@ export type MatrixFont = (typeof MATRIX_FONTS)[number];
 export const MATRIX_MATERIALS = ['铜模', '木活字', '铅合金'] as const;
 export type MatrixMaterial = (typeof MATRIX_MATERIALS)[number];
 
-/** 可用性：可用 / 停用 / 待补刻 */
-export const MATRIX_AVAILABILITIES = ['可用', '停用', '待补刻'] as const;
+/** 可用性：可用 / 停用 / 待补刻 / 借调中（字模随借调批次出库巡展） */
+export const MATRIX_AVAILABILITIES = ['可用', '停用', '待补刻', '借调中'] as const;
 export type MatrixAvailability = (typeof MATRIX_AVAILABILITIES)[number];
+
+/** 缺损登记可给出的可用性结论（借调中由借调批次流程维护，不由人工登记） */
+export const DEFECT_AVAILABILITIES = ['可用', '停用', '待补刻'] as const;
 
 /** 字号（初号至八号）与对应磅值 */
 export interface TypeSize {
